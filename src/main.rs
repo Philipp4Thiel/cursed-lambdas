@@ -120,20 +120,19 @@ macro_rules! make_state {
 impl Exp {
     fn eval(self, state: &State) -> Exp {
         match self {
-            Exp::Not(e1) => match e1.eval(state) {
-                Exp::Num(n) => Exp::Num(!n),
-                e1 => Exp::Not(Box::new(e1)),
+            Exp::Not(e) => match e.eval(state) {
+                Exp::Num(n) => Exp::Num((n == 0) as i32),
+                e => Exp::Not(Box::new(e)),
             },
-            Exp::Op(e1, op, e2) => op.eval(state, *e1, *e2),
-            Exp::Lambda(l) => Exp::Lambda(l),
             Exp::Var(v) => {
                 if state.contains_key(&v) {
-                    state.get(&v).unwrap().clone().eval(state)
+                    *state.get(&v).unwrap().clone()
                 } else {
                     Exp::Var(v)
                 }
             }
-            Exp::Num(n) => Exp::Num(n),
+            Exp::Op(e1, op, e2) => op.eval(state, *e1, *e2),
+            e => e,
         }
     }
     fn to_string(&self) -> String {
@@ -155,12 +154,14 @@ impl Exp {
         match self {
             Exp::Lambda(l) => l.replace_var(var, new_exp),
             Exp::Var(v) if v == *var => Box::new(new_exp.clone()),
+            Exp::Var(v) => Box::new(Exp::Var(v)),
             Exp::Op(e1, op, e2) => Box::new(Exp::Op(
                 e1.replace_var(var, new_exp),
                 op,
                 e2.replace_var(var, new_exp),
             )),
-            _ => Box::new(self),
+            Exp::Not(e) => Box::new(Exp::Not(e.replace_var(var, new_exp))),
+            Exp::Num(n) => Box::new(Exp::Num(n)),
         }
     }
 }
@@ -170,46 +171,44 @@ impl Operator {
         match self {
             Operator::Add => '+',
             Operator::Mul => '*',
-            Operator::App => ' ',
+            Operator::App => unreachable!("Operator::App has no associated character"),
             Operator::Less => '<',
         }
     }
 
     fn eval(self, state: &State, e1: Exp, e2: Exp) -> Exp {
         match self {
+            Operator::Add => match e1.eval(state) {
+                Exp::Num(0) => e2.eval(state),
+                Exp::Num(n1) => match e2.eval(state) {
+                    Exp::Num(n2) => Exp::Num(n1 + n2),
+                    e2 => Exp::Op(Box::new(Exp::Num(n1)), Operator::Add, Box::new(e2)),
+                },
+                e1 => match e2.eval(state) {
+                    Exp::Num(0) => e1,
+                    e2 => Exp::Op(Box::new(e1), Operator::Add, Box::new(e2)),
+                },
+            },
+            Operator::App => match e1.eval(state) {
+                Exp::Lambda(l) => l.apply(&Box::new(e2)).eval(state),
+                e => Exp::Op(Box::new(e), Operator::Add, Box::new(e2)),
+            },
             Operator::Mul => match e1.eval(state) {
                 Exp::Num(0) => Exp::Num(0),
                 Exp::Num(1) => e2.eval(state),
-                e1 => match (e1, e2.eval(state)) {
-                    (Exp::Num(c1), Exp::Num(c2)) => Exp::Num(c1 * c2),
-                    (_, Exp::Num(0)) => Exp::Num(0),
-                    (e1, Exp::Num(1)) => e1,
-                    (e1, e2) => Exp::Op(Box::new(e1), Operator::Mul, Box::new(e2)),
+                Exp::Num(n1) => match e2.eval(state) {
+                    Exp::Num(n2) => Exp::Num(n1 * n2),
+                    e2 => Exp::Op(Box::new(Exp::Num(n1)), Operator::Mul, Box::new(e2)),
+                },
+                e1 => match e2.eval(state) {
+                    Exp::Num(0) => Exp::Num(0),
+                    Exp::Num(1) => e1,
+                    e2 => Exp::Op(Box::new(e1), Operator::Mul, Box::new(e2)),
                 },
             },
-
-            Operator::Add => match (e1.eval(state), e2.eval(state)) {
-                (Exp::Num(c1), Exp::Num(c2)) => Exp::Num(c1 + c2),
-                (e1, Exp::Num(0)) => e1,
-                (Exp::Num(0), e2) => e2,
-                (e1, e2) => Exp::Op(Box::new(e1), Operator::Add, Box::new(e2)),
-            },
-
             Operator::Less => match (e1.eval(state), e2.eval(state)) {
-                (Exp::Num(c1), Exp::Num(c2)) => Exp::Num((c1 < c2) as i32),
+                (Exp::Num(n1), Exp::Num(n2)) => Exp::Num((n1 < n2) as i32),
                 (e1, e2) => Exp::Op(Box::new(e1), Operator::Less, Box::new(e2)),
-            },
-
-            Operator::App => match e1 {
-                Exp::Var(v) => Exp::Op(
-                    Box::new(Exp::Var(v).eval(state)),
-                    Operator::App,
-                    Box::new(e2),
-                )
-                .eval(state),
-                Exp::Lambda(l) => l.apply(&Box::new(e2)).eval(state),
-                Exp::Num(_) => panic!("tried to apply int"),
-                e1 => Exp::Op(Box::new(e1.eval(state)), Operator::App, Box::new(e2)),
             },
         }
     }
@@ -272,11 +271,13 @@ fn run_prog(mut prog: Prog, mut state: State) -> Exp {
 fn main() {
     // built in functions written in the lang itself
     let state = make_state!(
-        (not (c -> (! c)))
+        (if (if_condition -> (if_exp_a -> (if_exp_b -> (((!(! if_condition)) * if_exp_a) + ((! if_condition) * if_exp_b))))))
+        (node (node_cur -> (node_next -> (node_input -> (if node_input (node_next (node_input + (-1))) node_cur)))))
     );
 
     let if_prog: Prog = parse!(
-        (def res (not 1))
+        (def list (node elem_0 (node elem_1 (node elem_2 nil))))
+        (def res (list 10))
     );
 
     let res = run_prog(if_prog, state);
