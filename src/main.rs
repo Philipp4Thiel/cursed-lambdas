@@ -191,6 +191,10 @@ impl Operator {
             },
             Operator::App => match e1.eval(state) {
                 Exp::Lambda(l) => l.apply(&Box::new(e2)).eval(state),
+                Exp::Var(v) => {
+                    println!("Exiting with error:\n{}", v);
+                    std::process::exit(1);
+                }
                 e => Exp::Op(Box::new(e), Operator::Add, Box::new(e2)),
             },
             Operator::Mul => match e1.eval(state) {
@@ -272,12 +276,13 @@ fn main() {
     // built in functions written in the lang itself
     let state = make_state!(
         (if (if_condition -> (if_exp_a -> (if_exp_b -> (((!(! if_condition)) * if_exp_a) + ((! if_condition) * if_exp_b))))))
-        (node (node_cur -> (node_next -> (node_input -> (if node_input (node_next (node_input + (-1))) node_cur)))))
+        (create_list (node_cur -> (node_next -> (node_input -> (if node_input (node_next (node_input + (-1))) node_cur)))))
     );
 
     let if_prog: Prog = parse!(
-        (def list (node elem_0 (node elem_1 (node elem_2 nil))))
-        (def res (list 10))
+        (def list (create_list elem_0 (create_list elem_1 (create_list elem_2 OutOfBounds))))
+        (def index 0)
+        (def res (list index))
     );
 
     let res = run_prog(if_prog, state);
