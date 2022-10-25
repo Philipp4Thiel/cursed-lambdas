@@ -103,7 +103,7 @@ macro_rules! parse {
 }
 
 macro_rules! make_state {
-    ($(($name:ident $exp:tt))*) => {
+    ($((def $name:ident $exp:tt))*) => {
         {
             let mut temp:State = HashMap::new();
             $(
@@ -239,53 +239,33 @@ impl Lambda {
     }
 }
 
-impl Ass {
-    fn to_string(&self) -> String {
-        format!("(def {} {})", self.identifier, self.value.to_string())
-    }
-}
-
-fn run_prog(mut prog: Prog, mut state: State) -> Exp {
-    // println!("program:");
-    // for a in &prog {
-    //     println!("{}", a.to_string());
-    // }
-    // println!();
-
-    while prog.len() > 1 {
+fn run_prog(mut prog: Prog, state: &mut State) {
+    while prog.len() > 0 {
         let ass = prog.remove(0);
-        // println!(
-        //     "evaluating assignment: {} = {}\n",
-        //     ass.identifier,
-        //     ass.value.to_string()
-        // );
         let tmp = Box::new(ass.value.eval(&state));
-        // println!(
-        //     "\nresulting assignment: {} = {}\n",
-        //     ass.identifier,
-        //     tmp.to_string()
-        // );
         state.insert(ass.identifier, tmp);
     }
-    let ass = prog.remove(0);
-    println!("evaluating last exp:\n{}", ass.value.to_string());
-    ass.value.eval(&state)
 }
 
 fn main() {
     // built in functions written in the lang itself
-    let state = make_state!(
-        (if (if_condition -> (if_exp_a -> (if_exp_b -> (((!(! if_condition)) * if_exp_a) + ((! if_condition) * if_exp_b))))))
-        (create_list (node_cur -> (node_next -> (node_input -> (if node_input (node_next (node_input + (-1))) node_cur)))))
+    // `not` aka `!` was once here too, but to increaase performace it is now in the interpreter
+    let mut state = make_state!(
+        (def if (_condition -> (_exp_a -> (_exp_b -> (((!(! _condition)) * _exp_a) + ((! _condition) * _exp_b))))))
+        (def create_list (_cur_val -> (_next_node -> (_index -> (if _index (_next_node (_index + (-1))) _cur_val)))))
+        (def func_concat (_f1 -> (_f2 -> (_x -> (_f1 (_f2 _x))))))
+        (def map func_concat) 
     );
 
     let if_prog: Prog = parse!(
-        (def list (create_list elem_0 (create_list elem_1 (create_list elem_2 OutOfBounds))))
-        (def index 0)
-        (def res (list index))
+        (def list (create_list 0 (create_list 1 (create_list 2 OutOfBounds_Error))))
+        (def double (_x -> (_x * 2)))
+        (def plus_two (_x -> (_x + 2)))
+        (def combined (func_concat double plus_two))
+        (def mapped_list (map combined list))
+        (def res (mapped_list 1))
     );
 
-    let res = run_prog(if_prog, state);
-    println!("value of last exp:");
-    println!("{}", res.to_string());
+    run_prog(if_prog, &mut state);
+    println!("value of res: {}", parse!(res).eval(&state).to_string());
 }
