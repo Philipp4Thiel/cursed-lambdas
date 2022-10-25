@@ -5,6 +5,7 @@ enum Exp {
     Lambda(Lambda),
     Var(Identifier),
     Num(i32),
+    Not(Box<Exp>),
     Op(Box<Exp>, Operator, Box<Exp>),
 }
 
@@ -68,7 +69,11 @@ macro_rules! parse {
     ((-$e:tt)) => {
         Box::new(Exp::Op(Box::new(Exp::Num(-1)),Operator::Mul,parse!($e)))
     };
-    // op
+    // 1 input opp
+    ((! $e2:tt)) => {
+        Box::new(Exp::Not(parse!($e2)))
+    };
+    // 2 input opp
     (($e1:tt + $e2:tt)) => {
         Box::new(Exp::Op(parse!($e1), Operator::Add, parse!($e2)))
     };
@@ -98,7 +103,7 @@ macro_rules! parse {
 }
 
 macro_rules! make_state {
-    ($(($name:ident $exp:tt))+) => {
+    ($(($name:ident $exp:tt))*) => {
         {
             let mut temp:State = HashMap::new();
             $(
@@ -115,6 +120,10 @@ macro_rules! make_state {
 impl Exp {
     fn eval(self, state: &State) -> Exp {
         match self {
+            Exp::Not(e1) => match e1.eval(state) {
+                Exp::Num(n) => Exp::Num(!n),
+                e1 => Exp::Not(Box::new(e1)),
+            },
             Exp::Op(e1, op, e2) => op.eval(state, *e1, *e2),
             Exp::Lambda(l) => Exp::Lambda(l),
             Exp::Var(v) => {
@@ -130,6 +139,7 @@ impl Exp {
     fn to_string(&self) -> String {
         match self {
             Exp::Lambda(l) => l.to_string(),
+            Exp::Not(e1) => format!("!{}", e1.to_string()),
             Exp::Var(v) => format!("{v}"),
             Exp::Num(n) => format!("{n}"),
             Exp::Op(e1, Operator::App, e2) => {
@@ -196,9 +206,8 @@ impl Operator {
                     Operator::App,
                     Box::new(e2),
                 )
-                .eval(state)
                 .eval(state),
-                Exp::Lambda(l) => l.apply(&Box::new(e2)).eval(state).eval(state),
+                Exp::Lambda(l) => l.apply(&Box::new(e2)).eval(state),
                 Exp::Num(_) => panic!("tried to apply int"),
                 e1 => Exp::Op(Box::new(e1.eval(state)), Operator::App, Box::new(e2)),
             },
@@ -234,11 +243,11 @@ impl Ass {
 }
 
 fn run_prog(mut prog: Prog, mut state: State) -> Exp {
-    println!("program:");
-    for a in &prog {
-        println!("{}", a.to_string());
-    }
-    println!();
+    // println!("program:");
+    // for a in &prog {
+    //     println!("{}", a.to_string());
+    // }
+    // println!();
 
     while prog.len() > 1 {
         let ass = prog.remove(0);
@@ -256,21 +265,18 @@ fn run_prog(mut prog: Prog, mut state: State) -> Exp {
         state.insert(ass.identifier, tmp);
     }
     let ass = prog.remove(0);
-    // println!("evaluating last exp:\n{}", ass.value.to_string());
+    println!("evaluating last exp:\n{}", ass.value.to_string());
     ass.value.eval(&state)
 }
 
 fn main() {
     // built in functions written in the lang itself
     let state = make_state!(
-        (if (c -> (a -> (b -> ((((x -> ((x < (-x)) + ((-x) < x))) c) * a) + (((x -> ((-((x -> ((x < (-x)) + ((-x) < x))) x)) + 1)) c) * b))))))
+        (not (c -> (! c)))
     );
 
     let if_prog: Prog = parse!(
-        (def rec_times_2 (x -> (if (x < 1) 0 (2 + (rec_times_2 (x + (-1)))))))
-        (def res (rec_times_2 410))
-        // (def b (a -> (3 * a)))
-        // (def c (b (b (b (b 3)))))
+        (def res (not 1))
     );
 
     let res = run_prog(if_prog, state);
