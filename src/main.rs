@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Exp {
     Lambda(Lambda),
     Var(Identifier),
@@ -9,14 +9,15 @@ enum Exp {
     Op(Box<Exp>, Operator, Box<Exp>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Lambda {
     arg: Identifier,
     exp: Box<Exp>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Operator {
+    Eq,
     Add,
     Mul,
     App,
@@ -61,7 +62,7 @@ macro_rules! parse {
             Box::new(Exp::Var(s))
         }
     };
-    //num
+    // num
     ($int:literal) => {
         Box::new(Exp::Num($int))
     };
@@ -70,18 +71,24 @@ macro_rules! parse {
         Box::new(Exp::Op(Box::new(Exp::Num(-1)),Operator::Mul,parse!($e)))
     };
     // 1 input opp
-    ((! $e2:tt)) => {
+    ((!$e2:tt)) => {
         Box::new(Exp::Not(parse!($e2)))
     };
     // 2 input opp
     (($e1:tt + $e2:tt)) => {
         Box::new(Exp::Op(parse!($e1), Operator::Add, parse!($e2)))
     };
+    (($e1:tt - $e2:tt)) => {
+        Box::new(Exp::Op(parse!($e1), Operator::Add, parse!((-$e2))))
+    };
     (($e1:tt * $e2:tt)) => {
         Box::new(Exp::Op(parse!($e1), Operator::Mul, parse!($e2)))
     };
     (($e1:tt < $e2:tt)) => {
         Box::new(Exp::Op(parse!($e1), Operator::Less, parse!($e2)))
+    };
+    (($e1:tt = $e2:tt)) => {
+        Box::new(Exp::Op(parse!($e1), Operator::Eq, parse!($e2)))
     };
     // lambda
     (($arg:ident -> $exp:tt)) => {
@@ -169,6 +176,7 @@ impl Exp {
 impl Operator {
     fn get_char(&self) -> char {
         match self {
+            Operator::Eq => '=',
             Operator::Add => '+',
             Operator::Mul => '*',
             Operator::App => unreachable!("Operator::App has no associated character"),
@@ -189,10 +197,10 @@ impl Operator {
                     e2 => Exp::Op(Box::new(e1), Operator::Add, Box::new(e2)),
                 },
             },
-            Operator::App => match e1.eval(state) {
+            Operator::App => match e1.clone().eval(state) {
                 Exp::Lambda(l) => l.apply(&Box::new(e2)).eval(state),
-                Exp::Var(v) => {
-                    println!("Exiting with error:\n{}", v);
+                Exp::Var(_) | Exp::Num(_) => {
+                    println!("Exiting with error:\n{}", e1.to_string());
                     std::process::exit(1);
                 }
                 e => Exp::Op(Box::new(e), Operator::Add, Box::new(e2)),
@@ -214,6 +222,7 @@ impl Operator {
                 (Exp::Num(n1), Exp::Num(n2)) => Exp::Num((n1 < n2) as i32),
                 (e1, e2) => Exp::Op(Box::new(e1), Operator::Less, Box::new(e2)),
             },
+            Operator::Eq => Exp::Num((e1.eval(state) == e2.eval(state)) as i32),
         }
     }
 }
@@ -252,18 +261,16 @@ fn main() {
     // `not` aka `!` was once here too, but to increaase performace it is now in the interpreter
     let mut state = make_state!(
         (def if (_condition -> (_exp_a -> (_exp_b -> (((!(! _condition)) * _exp_a) + ((! _condition) * _exp_b))))))
-        (def create_list (_cur_val -> (_next_node -> (_index -> (if _index (_next_node (_index + (-1))) _cur_val)))))
-        (def func_concat (_f1 -> (_f2 -> (_x -> (_f1 (_f2 _x))))))
-        (def map func_concat) 
+        (def list_add (_new_val -> (_old_list -> (_in -> (if (_in = HEAD) _new_val (if (_in = TAIL) _old_list INVALID_LIST_COMMAND))))))
+        (def list_print (_list -> (if (_list = NULL) NULL ((_list HEAD) + (list_print (_list TAIL))))))
+        (def list_map (_f -> (_list -> (list_add (_f (_list HEAD)) (if ((_list TAIL) = NULL) NULL (list_map _f (_list TAIL)))))))
     );
 
     let if_prog: Prog = parse!(
-        (def list (create_list 0 (create_list 1 (create_list 2 OutOfBounds_Error))))
-        (def double (_x -> (_x * 2)))
-        (def plus_two (_x -> (_x + 2)))
-        (def combined (func_concat double plus_two))
-        (def mapped_list (map combined list))
-        (def res (mapped_list 1))
+        (def list (list_add 0 (list_add 1 (list_add 2 (list_add 3 NULL)))))
+        (def double (x -> (2 * x)))
+        (def mapped (list_map double list))
+        (def res (list_print mapped))
     );
 
     run_prog(if_prog, &mut state);
